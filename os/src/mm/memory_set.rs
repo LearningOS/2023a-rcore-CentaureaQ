@@ -34,9 +34,10 @@ lazy_static! {
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
 }
 /// address space
+// MemorySet管理内存：页表，映射vpn到ppn，映射虚拟地址到物理地址
 pub struct MemorySet {
     page_table: PageTable,
-    areas: Vec<MapArea>,
+    areas: Vec<MapArea>, // 以页为单位管理一段连续的虚拟内存
     map_tree: BTreeMap<VirtPageNum, FrameTracker>,
 }
 
@@ -82,6 +83,7 @@ impl MemorySet {
         );
     }
     /// Without kernel stacks.
+    /// 创建内核空间的内存映射
     pub fn new_kernel() -> Self {
         let mut memory_set = Self::new_bare();
         // map trampoline
@@ -226,6 +228,7 @@ impl MemorySet {
     }
     /// Change page table by writing satp CSR Register.
     pub fn activate(&self) {
+        // 获取当前页表的 satp（Supervisor Address Translation and Protection）寄存器的值，
         let satp = self.page_table.token();
         unsafe {
             satp::write(satp);
@@ -342,10 +345,11 @@ impl MemorySet {
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
-    vpn_range: VPNRange,
-    data_frames: BTreeMap<VirtPageNum, FrameTracker>,
-    map_type: MapType,
-    map_perm: MapPermission,
+    vpn_range: VPNRange, // 虚拟页号范围区间
+    data_frames: BTreeMap<VirtPageNum, FrameTracker>, // 在map_type为Framed保存管理映射
+    map_type: MapType, // 映射方式
+    // 映射方式: 相同-恒等映射【内核使用】或者分页Framed【用户程序使用，每次分配新的物理页面】
+    map_perm: MapPermission, // 这段内存的映射权限：R W X U
 }
 
 impl MapArea {
@@ -364,10 +368,10 @@ impl MapArea {
             map_perm,
         }
     }
-    /// 新建一个虚拟页到物理页的映射
-    /// 如果映射类型是MapType::Framed: 从 FRAME_ALLOCATOR 处分配一个物理页frame, 并将 vpn 和 frame 插入到 data_frames 中
-    /// 如果映射类型是MapType::Identical, ppn和vpn相等
-    /// 无论是那种类型, 都在page_table中插入 vpn 到 ppn 的映射
+    // 新建一个虚拟页到物理页的映射
+    // 如果映射类型是MapType::Framed: 从 FRAME_ALLOCATOR 处分配一个物理页frame, 并将 vpn 和 frame 插入到 data_frames 中
+    // 如果映射类型是MapType::Identical, ppn和vpn相等
+    // 无论是那种类型, 都在page_table中插入 vpn 到 ppn 的映射
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
         let ppn: PhysPageNum;
         match self.map_type {
@@ -385,18 +389,21 @@ impl MapArea {
     }
     #[allow(unused)]
     pub fn unmap_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
+        // 释放物理页，同时清除页表
         if self.map_type == MapType::Framed {
             self.data_frames.remove(&vpn);
         }
         page_table.unmap(vpn);
     }
     pub fn map(&mut self, page_table: &mut PageTable) {
+        // 对于每一个虚拟页号，调用map_one
         for vpn in self.vpn_range {
             self.map_one(page_table, vpn);
         }
     }
     #[allow(unused)]
     pub fn unmap(&mut self, page_table: &mut PageTable) {
+        // 对于每一个虚拟页号，调用unmap_one
         for vpn in self.vpn_range {
             self.unmap_one(page_table, vpn);
         }

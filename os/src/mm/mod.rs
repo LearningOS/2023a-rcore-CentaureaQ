@@ -24,6 +24,6 @@ use page_table::{PTEFlags, PageTable};
 /// initiate heap allocator, frame allocator and kernel space
 pub fn init() {
     heap_allocator::init_heap();
-    frame_allocator::init_frame_allocator();
+    frame_allocator::init_frame_allocator(); // 内存管理、分配物理页面
     KERNEL_SPACE.exclusive_access().activate();
 }

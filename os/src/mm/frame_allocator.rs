@@ -45,9 +45,9 @@ trait FrameAllocator {
 }
 /// an implementation for frame allocator
 pub struct StackFrameAllocator {
-    current: usize,
+    current: usize, // current ppn，头尾两个，表示可以直接分配的
     end: usize,
-    recycled: Vec<usize>,
+    recycled: Vec<usize>, // 被释放的物理页面，可以再次分配
 }
 
 impl StackFrameAllocator {

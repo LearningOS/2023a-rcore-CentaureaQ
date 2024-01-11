@@ -84,7 +84,7 @@ impl TaskControlBlock {
             kernel_stack_top,
             trap_handler as usize,
         );
-        task_control_block
+        task_control_block // 得到该结构块的tcb
     }
     /// change the location of the program break. return None if failed.
     pub fn change_program_brk(&mut self, size: i32) -> Option<usize> {
