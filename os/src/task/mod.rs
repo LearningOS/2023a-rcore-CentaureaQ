@@ -21,7 +21,8 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::loader::get_app_data_by_name;
+//use crate::loader::get_app_data_by_name;
+use crate::{config::MAX_SYSCALL_NUM, loader::get_app_data_by_name};
 use alloc::sync::Arc;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
@@ -60,6 +61,8 @@ pub const IDLE_PID: usize = 0;
 /// Exit the current 'Running' task and run the next task in task list.
 pub fn exit_current_and_run_next(exit_code: i32) {
     // take from Processor
+    // 调用 take_current_task 来将当前进程控制块从处理器监控 PROCESSOR 中取出，而不只是得到一份拷贝，
+    // 正确维护进程控制块的引用计数；
     let task = take_current_task().unwrap();
 
     let pid = task.getpid();
@@ -114,4 +117,44 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+/// Increase the sys call count
+pub fn increase_sys_call(sys_id: usize) {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .increase_sys_call(sys_id)
+}
+
+/// return the sys count array of the current task
+pub fn get_sys_call_times() -> [u32; MAX_SYSCALL_NUM] {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_sys_call_times()
+}
+
+/// return the sys count array of the current task
+pub fn get_task_run_times() -> usize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_task_run_times()
+}
+
+/// select_cur_task_to_mmap
+pub fn select_cur_task_to_mmap(start: usize, len: usize, port: usize) -> isize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .mmap(start, len, port)
+}
+
+/// select_cur_task_to_mmap
+pub fn select_cur_task_to_munmap(start: usize, len: usize) -> isize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .munmap(start, len)
 }
