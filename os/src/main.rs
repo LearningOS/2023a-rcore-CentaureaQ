@@ -98,10 +98,10 @@ pub fn rust_main() -> ! {
     clear_bss();
     kernel_log_info();
     heap_alloc::init_heap();
-    trap::init();
-    loader::load_apps();
+    trap::init(); // init trap handling, 初始化stvec：处理中断异常时候的入口地址【__alltraps】
+    loader::load_apps(); // 将用户态的测例加载进来
     trap::enable_timer_interrupt();
-    timer::set_next_trigger();
-    task::run_first_task();
+    timer::set_next_trigger(); // 使用sbi接口设置下一次时钟中断
+    task::run_first_task(); // 跳转到用户态执行第一个测例，即TaskManager中
     panic!("Unreachable in rust_main!");
 }

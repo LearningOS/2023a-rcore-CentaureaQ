@@ -90,9 +90,13 @@ pub fn load_apps() {
 }
 
 /// get app info with entry and sp and save `TrapContext` in kernel stack
+/// 获取应用程序的入口点和栈指针，并将 TrapContext 保存在内核栈中
 pub fn init_app_cx(app_id: usize) -> usize {
     KERNEL_STACK[app_id].push_context(TrapContext::app_init_context(
-        get_base_i(app_id),
-        USER_STACK[app_id].get_sp(),
+        get_base_i(app_id), // 获取应用程序的入口点，即为基地址+id*大小限制
+        USER_STACK[app_id].get_sp(), // 获取应用程序的栈指针
     ))
 }
+// 将用户栈的栈顶地址进行保存
+// TrapContext：陷入的上下文信息
+// 使用入口点与栈指针初始化 TrapContext，并保存在内核栈中

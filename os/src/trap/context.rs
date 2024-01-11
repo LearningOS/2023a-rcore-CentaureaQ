@@ -9,7 +9,7 @@ pub struct TrapContext {
     /// Supervisor Status Register
     pub sstatus: Sstatus,
     /// Supervisor Exception Program Counter
-    pub sepc: usize,
+    pub sepc: usize, // pc，陷入内核态之后返回用户态执行的入口地址
 }
 
 impl TrapContext {

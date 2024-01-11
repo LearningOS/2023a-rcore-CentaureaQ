@@ -52,6 +52,7 @@ pub struct TaskManagerInner {
 
 lazy_static! {
     /// Global variable: TASK_MANAGER
+    /// TASK_MANAGER 初始化
     pub static ref TASK_MANAGER: TaskManager = {
         let num_app = get_num_app();
         let mut tasks = [TaskControlBlock {
@@ -62,7 +63,7 @@ lazy_static! {
             // modify end
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
-            task.task_cx = TaskContext::goto_restore(init_app_cx(i));
+            task.task_cx = TaskContext::goto_restore(init_app_cx(i)); // 定义了任务上下文的恢复信息
             task.task_status = TaskStatus::Ready;
         }
         TaskManager {
@@ -83,18 +84,22 @@ impl TaskManager {
     /// Generally, the first task in task list is an idle task (we call it zero process later).
     /// But in ch3, we load apps statically, so the first task is a real app.
     fn run_first_task(&self) -> ! {
+        // 获取 self.inner 的独占访问权，并将结果存储在可变变量 inner 中
         let mut inner = self.inner.exclusive_access();
-        let task0 = &mut inner.tasks[0];
-        task0.task_status = TaskStatus::Running;
+        let task0 = &mut inner.tasks[0]; // 获取任务列表中的第一个任务
+        task0.task_status = TaskStatus::Running; // 将第一个任务的状态设置为 Running
+        // 获取第一个任务的上下文信息（TaskContext 的指针），存储在 next_task_cx_ptr 中
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
-        drop(inner);
-        let mut _unused = TaskContext::zero_init();
+        drop(inner); // 调用 drop(inner) 来显式地释放 inner 的独占访问权。
+        // 这是因为我们即将进行上下文切换，而在上下文切换之前，我们需要确保所有的局部变量都已经被正确地释放。
+        let mut _unused = TaskContext::zero_init(); // 全零初始化的 TaskContext
         // before this, we should drop local variables that must be dropped manually
         unsafe {
             __switch(&mut _unused as *mut TaskContext, next_task_cx_ptr);
+            // 切换到 next_task_cx_ptr 指向的任务上下文中执行【启动任务列表中的第一个任务，并进行上下文切换】
         }
         panic!("unreachable in run_first_task!");
-    }
+    } // 将第一个任务的上下文信息读取出来，然后跳转到该任务的上下文中执行
 
     /// Change the status of current `Running` task into `Ready`.
     fn mark_current_suspended(&self) {
@@ -143,14 +148,14 @@ impl TaskManager {
     }
     // modify 
     fn increase_sys_call(&self, sys_id: usize) {
-        let mut inner: core::cell::RefMut<'_, TaskManagerInner> = self.inner.exclusive_access();
-        let current_task = inner.current_task;
-        inner.tasks[current_task].sys_call_times[sys_id] += 1;
+        let mut inner: core::cell::RefMut<'_, TaskManagerInner> = self.inner.exclusive_access(); // 获取 self.inner 的独占访问权
+        let current_task = inner.current_task; // 获取当前任务的 ID，并将其存储在 current_task 中
+        inner.tasks[current_task].sys_call_times[sys_id] += 1; // 增加了一次系统调用的调用次数
     }
 
-    fn get_sys_call_times(&self) -> [u32; MAX_SYSCALL_NUM] {
-        let inner: core::cell::RefMut<'_, TaskManagerInner> = self.inner.exclusive_access();
-        inner.tasks[inner.current_task].sys_call_times.clone()
+    fn get_sys_call_times(&self) -> [u32; MAX_SYSCALL_NUM] { // 获取当前任务的系统调用次数
+        let inner: core::cell::RefMut<'_, TaskManagerInner> = self.inner.exclusive_access(); // 独占访问
+        inner.tasks[inner.current_task].sys_call_times.clone() // sys_call_times: 当前任务的系统调用次数
     }
     // modify end
 }

@@ -58,7 +58,7 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 /// YOUR JOB: Finish sys_task_info to pass testcases
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info");
-    //-1
+    // 获取任务的信息，并将其保存在 _ti 指向的内存中。
     unsafe {
         *_ti = TaskInfo {
             status: TaskStatus::Running,
