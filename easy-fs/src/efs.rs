@@ -13,7 +13,8 @@ pub struct EasyFileSystem {
     pub inode_bitmap: Bitmap,
     ///Data bitmap
     pub data_bitmap: Bitmap,
-    inode_area_start_block: u32,
+    ///Inode block start
+    pub inode_area_start_block: u32,
     data_area_start_block: u32,
 }
 
@@ -33,6 +34,7 @@ impl EasyFileSystem {
             ((inode_num * core::mem::size_of::<DiskInode>() + BLOCK_SZ - 1) / BLOCK_SZ) as u32;
         let inode_total_blocks = inode_bitmap_blocks + inode_area_blocks;
         let data_total_blocks = total_blocks - 1 - inode_total_blocks;
+        // 因为位图中的每个块能够对应 4096 个数据块。其余的块就都作为数据块使用。
         let data_bitmap_blocks = (data_total_blocks + 4096) / 4097;
         let data_area_blocks = data_total_blocks - data_bitmap_blocks;
         let data_bitmap = Bitmap::new(
@@ -71,6 +73,7 @@ impl EasyFileSystem {
         );
         // write back immediately
         // create a inode for root node "/"
+        // 调用 alloc_inode 在 inode 位图中分配一个 inode 编号
         assert_eq!(efs.alloc_inode(), 0);
         let (root_inode_block_id, root_inode_offset) = efs.get_disk_inode_pos(0);
         get_block_cache(root_inode_block_id as usize, Arc::clone(&block_device))
