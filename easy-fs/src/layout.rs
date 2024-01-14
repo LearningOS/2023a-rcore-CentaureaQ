@@ -8,7 +8,7 @@ const EFS_MAGIC: u32 = 0x3b800001;
 /// The max number of direct inodes
 const INODE_DIRECT_COUNT: usize = 27;
 /// The max length of inode name
-pub const NAME_LENGTH_LIMIT: usize = 27;
+const NAME_LENGTH_LIMIT: usize = 27;
 /// The max number of indirect1 inodes
 const INODE_INDIRECT1_COUNT: usize = BLOCK_SZ / 4;
 /// The max number of indirect2 inodes
@@ -23,8 +23,6 @@ const INDIRECT2_BOUND: usize = INDIRECT1_BOUND + INODE_INDIRECT2_COUNT;
 /// Super block of a filesystem
 #[repr(C)]
 pub struct SuperBlock {
-    // total_block 给出文件系统的总块数。
-    // 后面的四个字段则分别给出 easy-fs 布局中后四个连续区域的长度各为多少个块
     magic: u32,
     pub total_blocks: u32,
     pub inode_bitmap_blocks: u32,
@@ -87,8 +85,8 @@ pub struct DiskInode {
     pub direct: [u32; INODE_DIRECT_COUNT],
     pub indirect1: u32,
     pub indirect2: u32,
+    pub link_num: u32,
     type_: DiskInodeType,
-    pub refcont: u32, // 新增这个变量后需要将 INODE_DIRECT_COUNT - 1
 }
 
 impl DiskInode {
@@ -99,8 +97,8 @@ impl DiskInode {
         self.direct.iter_mut().for_each(|v| *v = 0);
         self.indirect1 = 0;
         self.indirect2 = 0;
+        self.link_num = 1;
         self.type_ = type_;
-        self.refcont = 1; // 初始化引用计数为1
     }
     /// Whether this inode is a directory
     pub fn is_dir(&self) -> bool {
@@ -168,9 +166,7 @@ impl DiskInode {
     /// Inncrease the size of current disk inode
     pub fn increase_size(
         &mut self,
-        // 扩充之后的文件大小
         new_size: u32,
-        // 保存了本次容量扩充所需块编号的向量，这些块都是由上层的磁盘块管理器负责分配的
         new_blocks: Vec<u32>,
         block_device: &Arc<dyn BlockDevice>,
     ) {
@@ -243,7 +239,6 @@ impl DiskInode {
 
     /// Clear size to zero and return blocks that should be deallocated.
     /// We will clear the block contents to zero later.
-    /// 将回收的所有块的编号保存在一个向量中返回给磁盘块管理器
     pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
         let mut v: Vec<u32> = Vec::new();
         let mut data_blocks = self.data_blocks() as usize;
@@ -331,7 +326,6 @@ impl DiskInode {
         let mut read_size = 0usize;
         loop {
             // calculate end of current block
-            // end_current_block: 到当前block末尾处包含了多少个字节
             let mut end_current_block = (start / BLOCK_SZ + 1) * BLOCK_SZ;
             end_current_block = end_current_block.min(end);
             // read and update read size
@@ -395,35 +389,12 @@ impl DiskInode {
         }
         write_size
     }
-
-    pub fn decrease_refcont(&mut self) {
-        self.refcont -= 1;
-    }
-
-    pub fn increase_refcont(&mut self) {
-        self.refcont += 1;
-    }
-
-    pub fn can_remove(&self) -> bool {
-        self.refcont == 0
-    }
-    /// 获取文件类型
-    /// return
-    ///     1 :File
-    ///     2 :Directory
-    pub fn get_statmode(&self) -> usize {
-        match self.type_ {
-            DiskInodeType::File => 1,
-            DiskInodeType::Directory => 2,
-        }
-    }
-
 }
 /// A directory entry
 #[repr(C)]
 pub struct DirEntry {
-    pub(crate) name: [u8; NAME_LENGTH_LIMIT + 1],
-    pub(crate) inode_id: u32,
+    name: [u8; NAME_LENGTH_LIMIT + 1],
+    inode_id: u32,
 }
 /// Size of a directory entry
 pub const DIRENT_SZ: usize = 32;

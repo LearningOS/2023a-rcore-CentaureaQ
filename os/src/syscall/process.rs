@@ -1,14 +1,14 @@
 //! Process management syscalls
 //!
+
 use alloc::sync::Arc;
 
 use crate::{
     config::MAX_SYSCALL_NUM,
     fs::{open_file, OpenFlags},
-    mm::{translated_refmut, translated_str},
+    mm::{translated_refmut, translated_str, VirtAddr, VirtPageNum},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next, get_sys_call_times,
-        get_task_run_times, select_cur_task_to_mmap, select_cur_task_to_munmap,
+        add_task, current_task, current_user_token, exit_current_and_run_next, mmap, munmap,
         suspend_current_and_run_next, TaskControlBlock, TaskStatus,
     },
     timer::get_time_us,
@@ -32,7 +32,6 @@ pub struct TaskInfo {
     time: usize,
 }
 
-/// task exits and submit an exit code
 pub fn sys_exit(exit_code: i32) -> ! {
     trace!("kernel:pid[{}] sys_exit", current_task().unwrap().pid.0);
     exit_current_and_run_next(exit_code);
@@ -40,7 +39,7 @@ pub fn sys_exit(exit_code: i32) -> ! {
 }
 
 pub fn sys_yield() -> isize {
-    trace!("kernel:pid[{}] sys_yield", current_task().unwrap().pid.0);
+    //trace!("kernel: sys_yield");
     suspend_current_and_run_next();
     0
 }
@@ -120,15 +119,11 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
     let us = get_time_us();
-    let ts = translated_refmut(current_user_token(), _ts);
-    *ts = TimeVal {
+    let ktime = translated_refmut(current_user_token(), ts);
+    *ktime = TimeVal {
         sec: us / 1_000_000,
         usec: us % 1_000_000,
     };
@@ -139,31 +134,50 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    let ti = translated_refmut(current_user_token(), _ti);
-
-    *ti = TaskInfo {
-        status: TaskStatus::Running,
-        syscall_times: get_sys_call_times(),
-        time: get_task_run_times(),
-    };
-    0
+    trace!(
+        "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
+        current_task().unwrap().pid.0
+    );
+    -1
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    if _len == 0 {
-        return 0;
+    trace!("kernel: sys_mmap");
+    let start_vaddr: VirtAddr = _start.into();
+    if !start_vaddr.aligned() {
+        debug!("map fail don't aligned");
+        return -1;
     }
     if _port & !0x7 != 0 || _port & 0x7 == 0 {
         return -1;
     }
-    select_cur_task_to_mmap(_start, _len, _port)
+    if _len == 0 {
+        return 0;
+    }
+    let end_vaddr: VirtAddr = (_start + _len).into();
+    let start_vpn: VirtPageNum = start_vaddr.into();
+    let end_vpn: VirtPageNum = (end_vaddr).ceil();
+
+    mmap(start_vpn, end_vpn, _port)
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    select_cur_task_to_munmap(_start, _len)
+    trace!("kernel: sys_munmap");
+    let start_vaddr: VirtAddr = _start.into();
+    if !start_vaddr.aligned() {
+        debug!("unmap fail don't aligned");
+        return -1;
+    }
+    if _len == 0 {
+        return 0;
+    }
+    let end_vaddr: VirtAddr = (_start + _len).into();
+    let start_vpn: VirtPageNum = start_vaddr.into();
+    let end_vpn: VirtPageNum = (end_vaddr).ceil();
+
+    munmap(start_vpn, end_vpn)
 }
 
 /// change data segment size
@@ -179,43 +193,54 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    let current_task = current_task();
-    if current_task.is_none() {
-        return -1;
-    }
-
-    let current_task = current_task.unwrap();
-
-    let mut current_inner = current_task.inner_exclusive_access();
-
-    let token = current_inner.memory_set.token();
+    trace!("kernel:pid[{}] sys_spawn", current_task().unwrap().pid.0);
+    let token = current_user_token();
     let path = translated_str(token, _path);
+
     if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
-        let all_data = app_inode.read_all();
-        let data = all_data.as_slice();
-        let child_block = Arc::new(TaskControlBlock::new(data));
-        let mut child_inner = child_block.inner_exclusive_access();
-        child_inner.parent = Some(Arc::downgrade(&current_task));
-        current_inner.children.push(child_block.clone());
-        add_task(child_block.clone());
-        return child_block.pid.0 as isize;
+        let data = app_inode.read_all();
+
+        let current_task = current_task().unwrap();
+        let mut parent_inner = current_task.inner_exclusive_access();
+
+        let new_tcb = Arc::new(TaskControlBlock::new(data.as_slice()));
+        let mut inner = new_tcb.inner_exclusive_access();
+
+        inner.parent = Some(Arc::downgrade(&current_task));
+        parent_inner.children.push(new_tcb.clone());
+        drop(inner);
+
+        let pid = new_tcb.pid.0 as isize;
+
+        add_task(new_tcb);
+
+        return pid;
     }
+
+    // if let Some(data) = get_app_data_by_name(path.as_str()) {
+    //     let current_task = current_task().unwrap();
+    //     let mut parent_inner = current_task.inner_exclusive_access();
+
+    //     let new_tcb = Arc::new(TaskControlBlock::new(data));
+    //     let mut inner = new_tcb.inner_exclusive_access();
+
+    //     inner.parent = Some(Arc::downgrade(&current_task));
+    //     parent_inner.children.push(new_tcb.clone());
+    //     drop(inner);
+
+    //     let pid = new_tcb.pid.0 as isize;
+
+    //     add_task(new_tcb);
+
+    //     return pid;
+    // }
     -1
 }
-
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    if _prio < 2 {
-        return -1;
-    }
-    current_task().unwrap().inner_exclusive_access().pro_lev = _prio as usize;
-    _prio
+    -1
 }
